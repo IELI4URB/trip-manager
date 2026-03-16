@@ -3,15 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-
-// For Turso (production), use:
-// datasource db {
-//   provider = "sqlite"
-//   url      = env("TURSO_DATABASE_URL")
-// }
 
 // ============================================
 // CORE TRIP MODEL - Travel Command Center
