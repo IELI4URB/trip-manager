@@ -1,8 +1,41 @@
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
-const openai = new OpenAI({
+// AI Provider Configuration
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
+}) : null;
+
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+}) : null;
+
+// Unified AI completion
+async function getCompletion(systemPrompt: string, userPrompt: string, maxTokens = 2000): Promise<string> {
+  if (USE_CLAUDE && anthropic) {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
+    return textBlock?.text || '';
+  } else if (openai) {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+    });
+    return response.choices[0]?.message?.content || '';
+  }
+  throw new Error('No AI provider configured');
+}
 
 export interface TripContext {
   destination: string;
@@ -106,19 +139,9 @@ Include both global apps and local alternatives popular in ${context.country}.`;
   }
 
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 2000,
-    });
-
-    return response.choices[0]?.message?.content || 'Unable to generate suggestions at this time.';
+    return await getCompletion(systemPrompt, userPrompt, 2000);
   } catch (error) {
-    console.error('OpenAI API error:', error);
+    console.error('AI API error:', error);
     return 'AI suggestions are temporarily unavailable. Please check your API key configuration.';
   }
 }
@@ -158,19 +181,11 @@ Return a JSON object with the following structure (include only fields that are 
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 1000,
-      response_format: { type: 'json_object' },
-    });
-
-    const content = response.choices[0]?.message?.content;
-    return content ? JSON.parse(content) : null;
+    const content = await getCompletion(systemPrompt, userPrompt, 1000);
+    // Extract JSON from response
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || content.match(/(\{[\s\S]*\})/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    return JSON.parse(jsonStr.trim());
   } catch (error) {
     console.error('Document parsing error:', error);
     return null;
@@ -195,19 +210,11 @@ For each activity, provide:
 Return as a JSON array.`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.8,
-      max_tokens: 2000,
-      response_format: { type: 'json_object' },
-    });
-
-    const content = response.choices[0]?.message?.content;
-    const parsed = content ? JSON.parse(content) : { activities: [] };
+    const content = await getCompletion(systemPrompt, userPrompt, 2000);
+    // Extract JSON from response
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || content.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    const parsed = JSON.parse(jsonStr.trim());
     return parsed.activities || parsed;
   } catch (error) {
     console.error('Activity suggestions error:', error);

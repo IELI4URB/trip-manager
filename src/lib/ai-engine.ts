@@ -1,8 +1,76 @@
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
-const openai = new OpenAI({
+// AI Provider Configuration
+// Set ANTHROPIC_API_KEY to use Claude, or OPENAI_API_KEY for OpenAI
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
+}) : null;
+
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+}) : null;
+
+// Unified AI completion function
+async function getAICompletion(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number = 4000
+): Promise<string> {
+  if (USE_CLAUDE && anthropic) {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    
+    const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
+    return textBlock?.text || '';
+  } else if (openai) {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    });
+    
+    return response.choices[0]?.message?.content || '';
+  } else {
+    throw new Error('No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY');
+  }
+}
+
+// JSON AI completion (parses JSON from response)
+async function getAICompletionJSON<T>(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number = 4000,
+  defaultValue: T
+): Promise<T> {
+  try {
+    const content = await getAICompletion(
+      systemPrompt + '\n\nIMPORTANT: Respond ONLY with valid JSON, no markdown or extra text.',
+      userPrompt,
+      maxTokens
+    );
+    
+    // Extract JSON from response (handles markdown code blocks)
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || 
+                      content.match(/(\{[\s\S]*\})/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    
+    return JSON.parse(jsonStr.trim());
+  } catch (error) {
+    console.error('AI JSON parsing error:', error);
+    return defaultValue;
+  }
+}
 
 // ============================================
 // AI ITINERARY ENGINE
@@ -132,17 +200,12 @@ Return a JSON array of daily itineraries with this structure:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: 8000,
-      response_format: { type: 'json_object' },
-    });
-
-    const result = JSON.parse(response.choices[0].message.content || '{"itinerary": []}');
+    const result = await getAICompletionJSON<{ itinerary: ItineraryDay[] }>(
+      systemPrompt,
+      userPrompt,
+      8000,
+      { itinerary: [] }
+    );
     return result.itinerary || [];
   } catch (error) {
     console.error('Itinerary generation error:', error);
@@ -199,17 +262,20 @@ Return as JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: 4000,
-      response_format: { type: 'json_object' },
-    });
-
-    return JSON.parse(response.choices[0].message.content || '{}');
+    const result = await getAICompletionJSON<{ impact: ChangeImpact; updatedItinerary?: ItineraryDay[] }>(
+      systemPrompt,
+      userPrompt,
+      4000,
+      {
+        impact: {
+          severity: 'moderate',
+          affectedItems: ['Unable to analyze'],
+          suggestedActions: ['Please review manually'],
+          rebuildRequired: false,
+        },
+      }
+    );
+    return result;
   } catch (error) {
     console.error('Change analysis error:', error);
     return {
@@ -266,16 +332,9 @@ export async function getVisaRequirements(
   destinationCountry: string,
   nationality: string
 ): Promise<VisaRequirements> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a visa and immigration expert. Provide accurate, up-to-date visa requirements. Always err on the side of caution and recommend users verify with official embassy sources.',
-      },
-      {
-        role: 'user',
-        content: `Provide detailed visa requirements for a ${nationality} citizen traveling to ${destinationCountry}.
+  const systemPrompt = 'You are a visa and immigration expert. Provide accurate, up-to-date visa requirements. Always err on the side of caution and recommend users verify with official embassy sources.';
+  
+  const userPrompt = `Provide detailed visa requirements for a ${nationality} citizen traveling to ${destinationCountry}.
 
 Return as JSON:
 {
@@ -309,14 +368,9 @@ Return as JSON:
   "commonQuestions": ["Purpose of visit?", "Where will you stay?"],
   "tips": ["Apply early", "Keep copies of all documents"],
   "warnings": ["Processing may take longer during peak season"]
-}`,
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
+}`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<VisaRequirements>(systemPrompt, userPrompt, 2000, {} as VisaRequirements);
 }
 
 // ============================================
@@ -336,16 +390,8 @@ export async function getImmigrationPrep(
   destinationCountry: string,
   nationality: string
 ): Promise<ImmigrationPrep> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are an immigration and customs expert. Provide accurate information to help travelers prepare for arrival.',
-      },
-      {
-        role: 'user',
-        content: `Provide immigration preparation guide for a ${nationality} citizen arriving in ${destinationCountry}.
+  const systemPrompt = 'You are an immigration and customs expert. Provide accurate information to help travelers prepare for arrival.';
+  const userPrompt = `Provide immigration preparation guide for a ${nationality} citizen arriving in ${destinationCountry}.
 
 Return as JSON with:
 - arrivalDocuments: documents needed at immigration
@@ -353,14 +399,9 @@ Return as JSON with:
 - customsRules: important customs regulations
 - restrictedItems: items that are prohibited, restricted, or need declaration
 - arrivalForms: any arrival cards or forms required
-- healthRequirements: vaccination, health declaration, etc.`,
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
+- healthRequirements: vaccination, health declaration, etc.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<ImmigrationPrep>(systemPrompt, userPrompt, 2000, {} as ImmigrationPrep);
 }
 
 // ============================================
@@ -388,29 +429,16 @@ export interface PackingChecklist {
 export async function generatePackingChecklist(
   context: TripContext
 ): Promise<PackingChecklist> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a travel preparation expert. Create comprehensive, destination-specific packing lists.',
-      },
-      {
-        role: 'user',
-        content: `Create a packing checklist for:
+  const systemPrompt = 'You are a travel preparation expert. Create comprehensive, destination-specific packing lists.';
+  const userPrompt = `Create a packing checklist for:
 - Destination: ${context.destination}, ${context.country}
 - Dates: ${context.startDate} to ${context.endDate}
 - Travel Type: ${context.travelType || 'general'}
 - Travelers: ${context.numberOfTravelers || 1}
 
-Return JSON with categories (electronics, clothing, documents, toiletries, medicine, accessories), weather advice, plug type, voltage info, SIM/eSIM options, and last-minute reminders.`,
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
+Return JSON with categories (electronics, clothing, documents, toiletries, medicine, accessories), weather advice, plug type, voltage info, SIM/eSIM options, and last-minute reminders.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<PackingChecklist>(systemPrompt, userPrompt, 2000, {} as PackingChecklist);
 }
 
 // ============================================
@@ -440,27 +468,14 @@ export interface AppRecommendation {
 }
 
 export async function getCountryApps(country: string): Promise<CountryApps> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a travel technology expert. Recommend the best apps for travelers visiting different countries.',
-      },
-      {
-        role: 'user',
-        content: `Recommend essential mobile apps for traveling to ${country}. Include both global apps and local alternatives popular in that country.
+  const systemPrompt = 'You are a travel technology expert. Recommend the best apps for travelers visiting different countries.';
+  const userPrompt = `Recommend essential mobile apps for traveling to ${country}. Include both global apps and local alternatives popular in that country.
 
 Categories: navigation, transport (taxi/metro), payment, translation, food delivery, communication, emergency.
 
-Return as JSON with app name, description, whether it's essential, whether it's a local app, and alternatives.`,
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
+Return as JSON with app name, description, whether it's essential, whether it's a local app, and alternatives.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<CountryApps>(systemPrompt, userPrompt, 2000, {} as CountryApps);
 }
 
 // ============================================
@@ -504,28 +519,15 @@ export async function getFoodGuide(
   country: string,
   preferences?: string
 ): Promise<FoodGuide> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a culinary travel expert. Provide comprehensive food guides for travelers.',
-      },
-      {
-        role: 'user',
-        content: `Provide a food guide for ${destination}, ${country}.
+  const systemPrompt = 'You are a culinary travel expert. Provide comprehensive food guides for travelers.';
+  const userPrompt = `Provide a food guide for ${destination}, ${country}.
 ${preferences ? `Dietary preferences: ${preferences}` : ''}
 
 Include must-try dishes, best restaurant areas, food safety tips, tipping customs, average meal costs, delivery apps, and options for various dietary restrictions.
 
-Return as detailed JSON.`,
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
+Return as detailed JSON.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<FoodGuide>(systemPrompt, userPrompt, 2000, {} as FoodGuide);
 }
 
 // ============================================
@@ -575,16 +577,8 @@ export async function getSafetyGuide(
   country: string,
   nationality: string
 ): Promise<SafetyGuide> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a travel safety expert. Provide balanced, accurate safety information without being alarmist. Focus on practical advice.',
-      },
-      {
-        role: 'user',
-        content: `Provide a comprehensive safety guide for a ${nationality} traveler visiting ${destination}, ${country}.
+  const systemPrompt = 'You are a travel safety expert. Provide balanced, accurate safety information without being alarmist. Focus on practical advice.';
+  const userPrompt = `Provide a comprehensive safety guide for a ${nationality} traveler visiting ${destination}, ${country}.
 
 Include:
 - Overall safety level
@@ -598,14 +592,9 @@ Include:
 - LGBTQ+ safety awareness
 - Health risks to be aware of
 
-Return as detailed JSON.`,
-      },
-    ],
-    max_tokens: 2500,
-    response_format: { type: 'json_object' },
-  });
+Return as detailed JSON.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<SafetyGuide>(systemPrompt, userPrompt, 2500, {} as SafetyGuide);
 }
 
 // ============================================
@@ -647,16 +636,8 @@ export async function getJetLagPlan(
   departureDate: string,
   travelDirection: 'east' | 'west'
 ): Promise<JetLagPlan> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a sleep and travel wellness expert. Create science-based jet lag recovery plans.',
-      },
-      {
-        role: 'user',
-        content: `Create a jet lag management plan:
+  const systemPrompt = 'You are a sleep and travel wellness expert. Create science-based jet lag recovery plans.';
+  const userPrompt = `Create a jet lag management plan:
 - Origin timezone: ${originTimezone}
 - Destination timezone: ${destinationTimezone}
 - Departure date: ${departureDate}
@@ -664,14 +645,9 @@ export async function getJetLagPlan(
 
 Include pre-departure sleep adjustment, flight recommendations, arrival day strategy, and recovery plan.
 
-Return as JSON.`,
-      },
-    ],
-    max_tokens: 1500,
-    response_format: { type: 'json_object' },
-  });
+Return as JSON.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<JetLagPlan>(systemPrompt, userPrompt, 1500, {} as JetLagPlan);
 }
 
 // ============================================
@@ -705,27 +681,14 @@ export interface ShoppingGuide {
 }
 
 export async function getShoppingGuide(destination: string, country: string): Promise<ShoppingGuide> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a travel shopping expert. Help travelers make the most of shopping experiences.',
-      },
-      {
-        role: 'user',
-        content: `Provide a shopping guide for ${destination}, ${country}.
+  const systemPrompt = 'You are a travel shopping expert. Help travelers make the most of shopping experiences.';
+  const userPrompt = `Provide a shopping guide for ${destination}, ${country}.
 
 Include best shopping areas, local products worth buying, tax refund process and eligibility, bargaining tips, and payment options.
 
-Return as JSON.`,
-      },
-    ],
-    max_tokens: 1500,
-    response_format: { type: 'json_object' },
-  });
+Return as JSON.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  return await getAICompletionJSON<ShoppingGuide>(systemPrompt, userPrompt, 1500, {} as ShoppingGuide);
 }
 
 // ============================================
@@ -751,19 +714,16 @@ Be helpful, concise, and practical. Answer questions about the trip, suggest act
 
 If asked about crowding, transportation, weather, or timing, provide practical advice based on typical patterns for the destination.`;
 
-  const messages = [
-    { role: 'system' as const, content: systemPrompt },
-    ...conversationHistory,
-    { role: 'user' as const, content: message },
-  ];
+  // Format conversation history into the user prompt
+  const historyText = conversationHistory
+    .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+    .join('\n');
+  
+  const userPrompt = historyText 
+    ? `Previous conversation:\n${historyText}\n\nUser: ${message}`
+    : message;
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages,
-    max_tokens: 1000,
-  });
-
-  return response.choices[0].message.content || 'I apologize, but I could not generate a response. Please try again.';
+  return await getAICompletion(systemPrompt, userPrompt, 1000);
 }
 
 // ============================================
