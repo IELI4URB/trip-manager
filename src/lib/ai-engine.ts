@@ -1,16 +1,37 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import Groq from 'groq-sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // AI Provider Configuration
-// Set ANTHROPIC_API_KEY to use Claude, or OPENAI_API_KEY for OpenAI
-const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+// Priority: GROQ (free) > GEMINI (free tier) > ANTHROPIC > OPENAI
+type AIProvider = 'groq' | 'gemini' | 'anthropic' | 'openai' | null;
 
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+function getActiveProvider(): AIProvider {
+  if (process.env.GROQ_API_KEY) return 'groq';
+  if (process.env.GOOGLE_AI_API_KEY) return 'gemini';
+  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  if (process.env.OPENAI_API_KEY) return 'openai';
+  return null;
+}
+
+const activeProvider = getActiveProvider();
+
+// Initialize clients lazily
+const groq = process.env.GROQ_API_KEY ? new Groq({
+  apiKey: process.env.GROQ_API_KEY,
 }) : null;
+
+const gemini = process.env.GOOGLE_AI_API_KEY ? new GoogleGenerativeAI(
+  process.env.GOOGLE_AI_API_KEY
+) : null;
 
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
+}) : null;
+
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 }) : null;
 
 // Unified AI completion function
@@ -19,17 +40,40 @@ async function getAICompletion(
   userPrompt: string,
   maxTokens: number = 4000
 ): Promise<string> {
-  if (USE_CLAUDE && anthropic) {
+  const provider = getActiveProvider();
+  
+  if (provider === 'groq' && groq) {
+    // Groq - FREE tier (uses Llama 3.1 70B)
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    });
+    return response.choices[0]?.message?.content || '';
+  } else if (provider === 'gemini' && gemini) {
+    // Google Gemini - FREE tier
+    const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+    });
+    return result.response.text();
+  } else if (provider === 'anthropic' && anthropic) {
+    // Claude
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
-    
     const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
     return textBlock?.text || '';
-  } else if (openai) {
+  } else if (provider === 'openai' && openai) {
+    // OpenAI GPT-4
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
@@ -39,10 +83,9 @@ async function getAICompletion(
       max_tokens: maxTokens,
       temperature: 0.7,
     });
-    
     return response.choices[0]?.message?.content || '';
   } else {
-    throw new Error('No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY');
+    throw new Error('No AI provider configured. Set one of: GROQ_API_KEY (free), GOOGLE_AI_API_KEY (free tier), ANTHROPIC_API_KEY, or OPENAI_API_KEY');
   }
 }
 
