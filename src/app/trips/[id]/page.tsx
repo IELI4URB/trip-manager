@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -44,7 +44,7 @@ import AIAssistant from '@/components/AIAssistant';
 import DocumentUploader from '@/components/DocumentUploader';
 
 interface TripPageProps {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }
 
 const SECTIONS = [
@@ -62,7 +62,6 @@ const SECTIONS = [
 ];
 
 export default function TripPage({ params }: TripPageProps) {
-  const resolvedParams = use(params);
   const router = useRouter();
   const [trip, setTrip] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -72,11 +71,11 @@ export default function TripPage({ params }: TripPageProps) {
 
   useEffect(() => {
     fetchTrip();
-  }, [resolvedParams.id]);
+  }, [params.id]);
 
   const fetchTrip = async () => {
     try {
-      const res = await fetch(`/api/trips/${resolvedParams.id}`);
+      const res = await fetch(`/api/trips/${params.id}`);
       if (res.ok) {
         const data = await res.json();
         setTrip(data);
