@@ -1,0 +1,697 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// For Turso (production), use:
+// datasource db {
+//   provider = "sqlite"
+//   url      = env("TURSO_DATABASE_URL")
+// }
+
+// ============================================
+// CORE TRIP MODEL - Travel Command Center
+// ============================================
+model Trip {
+  id              String   @id @default(cuid())
+  name            String
+  destination     String
+  country         String
+  cities          String?  // JSON array of cities to visit
+  startDate       DateTime
+  endDate         DateTime
+  status          String   @default("planning") // planning, upcoming, active, completed
+  coverImage      String?
+  notes           String?
+  
+  // Travel preferences
+  travelType      String?  // luxury, family, solo, business, backpacking
+  budget          Float?
+  budgetCurrency  String?
+  numberOfTravelers Int    @default(1)
+  
+  // User preferences
+  foodPreference  String?  // vegetarian, vegan, halal, kosher, none
+  healthRequirements String? // JSON array
+  mobilityPreference String? // walking, minimal-walking, wheelchair
+  sleepPreference String?  // early-bird, night-owl, flexible
+  shoppingInterest String? // high, medium, low
+  
+  // Timezone & Weather
+  destinationTimezone String?
+  weatherSummary  String?  // JSON with weather data
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  flights         Flight[]
+  hotels          Hotel[]
+  activities      Activity[]
+  visaChecklist   VisaChecklistItem[]
+  moneyCards      MoneyCard[]
+  essentials      Essential[]
+  foodPlaces      FoodPlace[]
+  expenses        Expense[]
+  apps            RecommendedApp[]
+  transports      Transport[]
+  aiSuggestions   AISuggestion[]
+  documents       Document[]
+  dailyItinerary  DailyItinerary[]
+  emergencyContacts EmergencyContact[]
+  locations       Location[]
+  alerts          TravelAlert[]
+  shopping        ShoppingItem[]
+  travelers       Traveler[]
+  groupExpenses   GroupExpense[]
+  safetyInfo      SafetyInfo[]
+  jetLagPlan      JetLagPlan[]
+  baggageInfo     BaggageInfo[]
+  immigrationPrep ImmigrationPrep[]
+  notifications   Notification[]
+  aiChats         AIChat[]
+}
+
+// ============================================
+// FLIGHT - Enhanced Flight Information
+// ============================================
+model Flight {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  
+  // Basic flight info
+  airline         String
+  flightNumber    String
+  pnr             String?
+  
+  // Departure details
+  departureCity   String
+  departureAirport String?
+  departureAirportCode String?
+  departureTerminal String?
+  departureGate   String?
+  departureTime   DateTime
+  departureLat    Float?
+  departureLng    Float?
+  
+  // Arrival details
+  arrivalCity     String
+  arrivalAirport  String?
+  arrivalAirportCode String?
+  arrivalTerminal String?
+  arrivalGate     String?
+  arrivalTime     DateTime
+  arrivalLat      Float?
+  arrivalLng      Float?
+  
+  // Booking details
+  seatNumber      String?
+  cabinClass      String?  // economy, premium_economy, business, first
+  bookingRef      String?
+  ticketFile      String?
+  eTicketNumber   String?
+  
+  // Status & tracking
+  status          String   @default("confirmed") // confirmed, checked_in, boarding, delayed, cancelled
+  delayMinutes    Int?
+  liveTrackingUrl String?
+  
+  // Baggage
+  baggageAllowance String?
+  
+  // Web check-in
+  webCheckinUrl   String?
+  webCheckinOpens DateTime?
+  isCheckedIn     Boolean  @default(false)
+  boardingPass    String?
+  
+  // Airline contact
+  airlinePhone    String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// HOTEL - Enhanced Hotel Information
+// ============================================
+model Hotel {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  
+  // Basic info
+  name          String
+  address       String
+  city          String?
+  
+  // Coordinates
+  latitude      Float?
+  longitude     Float?
+  googlePlaceId String?
+  
+  // Booking details
+  checkIn       DateTime
+  checkOut      DateTime
+  checkInTime   String?  // e.g., "15:00"
+  checkOutTime  String?  // e.g., "11:00"
+  roomType      String?
+  numberOfRooms Int      @default(1)
+  bookingRef    String?
+  confirmationNumber String?
+  
+  // Contact
+  contactPhone  String?
+  contactEmail  String?
+  website       String?
+  
+  // Amenities & details
+  amenities     String?  // JSON array
+  wifiPassword  String?
+  parkingInfo   String?
+  
+  // Policies
+  cancellationPolicy String?
+  cancellationDeadline DateTime?
+  
+  // Payment
+  totalCost     Float?
+  currency      String?
+  isPaid        Boolean  @default(false)
+  
+  // Files
+  bookingFile   String?
+  
+  // Status
+  status        String   @default("confirmed")
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// ACTIVITY - Enhanced Activity Planning
+// ============================================
+model Activity {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  
+  // Basic info
+  name        String
+  description String?
+  location    String
+  address     String?
+  
+  // Coordinates
+  latitude    Float?
+  longitude   Float?
+  googlePlaceId String?
+  
+  // Timing
+  dateTime    DateTime
+  endTime     DateTime?
+  duration    Int?     // in minutes
+  
+  // Booking
+  price       Float?
+  currency    String?
+  bookingRef  String?
+  bookingUrl  String?
+  bookingDeadline DateTime?
+  ticketFile  String?
+  
+  // Categorization
+  category    String   // sightseeing, adventure, food, entertainment, relaxation, shopping, cultural
+  
+  // Status & Intelligence
+  status      String   @default("planned") // planned, booked, completed, cancelled
+  isPeakHour  Boolean  @default(false)
+  crowdLevel  String?  // low, moderate, high, very_high
+  bestVisitTime String? // AI suggested best time
+  weatherSensitive Boolean @default(false)
+  
+  // Photos
+  photos      String?  // JSON array
+  
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================
+// VISA CHECKLIST - Comprehensive Visa Process
+// ============================================
+model VisaChecklistItem {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  item        String
+  description String?
+  category    String   // document, form, appointment, financial, photo, interview, other
+  isCompleted Boolean  @default(false)
+  dueDate     DateTime?
+  notes       String?
+  priority    String   @default("medium") // low, medium, high, critical
+  
+  // Additional visa-specific fields
+  documentUrl String?  // Link to upload/download
+  referenceNumber String?
+  appointmentDate DateTime?
+  appointmentLocation String?
+  fee         Float?
+  feeCurrency String?
+  isPaid      Boolean  @default(false)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================
+// MONEY & CARDS - Finance Management
+// ============================================
+model MoneyCard {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type          String   // credit_card, debit_card, forex_card, cash, travel_card
+  name          String
+  lastFourDigits String?
+  bankName      String?
+  expiryDate    String?
+  isNotified    Boolean  @default(false) // notified bank about travel
+  isActivated   Boolean  @default(false) // international transactions enabled
+  limit         Float?
+  currency      String?
+  
+  // Additional fields
+  cardNetwork   String?  // visa, mastercard, amex, rupay
+  contactlessEnabled Boolean @default(false)
+  foreignTxnFee Float?   // percentage
+  atmWithdrawalFee Float?
+  dailyLimit    Float?
+  
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Essential {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  item        String
+  category    String   // electronics, clothing, documents, toiletries, medicine, accessories, other
+  quantity    Int      @default(1)
+  isPacked    Boolean  @default(false)
+  isEssential Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FoodPlace {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  name        String
+  cuisine     String
+  address     String?
+  priceRange  String?  // budget, moderate, expensive, luxury
+  rating      Float?
+  mustTry     String?  // dishes to try
+  isVisited   Boolean  @default(false)
+  visitDate   DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  category    String   // food, transport, accommodation, activities, shopping, other
+  description String
+  amount      Float
+  currency    String
+  amountInBase Float?
+  baseCurrency String?
+  date        DateTime
+  paymentMethod String? // cash, card, forex
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model RecommendedApp {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  name        String
+  category    String   // navigation, translation, transport, food, payment, communication, other
+  description String?
+  isInstalled Boolean  @default(false)
+  appStoreUrl String?
+  playStoreUrl String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Transport {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type        String   // taxi, uber, metro, bus, train, shuttle, rental
+  name        String
+  from        String
+  to          String
+  estimatedCost Float?
+  currency    String?
+  duration    Int?     // in minutes
+  bookingUrl  String?
+  bookingRef  String?
+  isBooked    Boolean  @default(false)
+  scheduledTime DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AISuggestion {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type        String   // peak_hour, weather, activity, safety, budget, general
+  title       String
+  content     String
+  priority    String   @default("medium") // low, medium, high
+  isRead      Boolean  @default(false)
+  isDismissed Boolean  @default(false)
+  validUntil  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================
+// DOCUMENT VAULT - Secure Document Storage
+// ============================================
+model Document {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type          String   // passport, visa, ticket, hotel_booking, insurance, invitation, forex, other
+  name          String
+  fileName      String
+  fileUrl       String
+  fileSize      Int?
+  mimeType      String?
+  extractedData String?  // JSON with OCR extracted data
+  isVerified    Boolean  @default(false)
+  expiryDate    DateTime?
+  isEncrypted   Boolean  @default(true)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// DAILY ITINERARY - AI Generated Day Plans
+// ============================================
+model DailyItinerary {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  date          DateTime
+  dayNumber     Int
+  title         String?  // e.g., "Day 1: Arrival & City Tour"
+  items         String   // JSON array of itinerary items
+  weatherNote   String?
+  rushHourNote  String?
+  totalDistance Float?   // in km
+  totalDuration Int?     // in minutes
+  isOptimized   Boolean  @default(false)
+  alternateRoute String? // JSON backup itinerary
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// LOCATIONS - Navigation & Maps Engine
+// ============================================
+model Location {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type          String   // hotel, airport, attraction, restaurant, embassy, hospital, atm, shopping, station
+  name          String
+  address       String
+  latitude      Float?
+  longitude     Float?
+  googlePlaceId String?
+  phoneNumber   String?
+  website       String?
+  openingHours  String?  // JSON
+  rating        Float?
+  priceLevel    Int?     // 1-4
+  photos        String?  // JSON array of photo URLs
+  isSaved       Boolean  @default(false)
+  isVisited     Boolean  @default(false)
+  visitedAt     DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// EMERGENCY CONTACTS
+// ============================================
+model EmergencyContact {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type          String   // personal, embassy, police, ambulance, hotel, airline, insurance
+  name          String
+  phoneNumber   String
+  alternatePhone String?
+  email         String?
+  address       String?
+  relationship  String?  // for personal contacts
+  notes         String?
+  isPrimary     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// TRAVEL ALERTS - Live Intelligence
+// ============================================
+model TravelAlert {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type          String   // flight_delay, gate_change, weather, traffic, strike, political, closure, health
+  severity      String   // info, warning, critical
+  title         String
+  message       String
+  source        String?  // API source
+  affectedItem  String?  // flight ID, hotel ID, etc.
+  actionRequired String?
+  expiresAt     DateTime?
+  isRead        Boolean  @default(false)
+  isDismissed   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// SHOPPING - Tax Refund & Shopping Guide
+// ============================================
+model ShoppingItem {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  item            String
+  store           String?
+  location        String?
+  estimatedPrice  Float?
+  actualPrice     Float?
+  currency        String?
+  isPurchased     Boolean  @default(false)
+  purchaseDate    DateTime?
+  isTaxRefundable Boolean  @default(false)
+  taxRefundStatus String?  // pending, processed, received
+  receiptFile     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// GROUP TRAVEL - Multi-Traveler Support
+// ============================================
+model Traveler {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  name          String
+  email         String?
+  phone         String?
+  passportNumber String?
+  nationality   String?
+  dateOfBirth   DateTime?
+  emergencyContact String?
+  dietaryRestrictions String?
+  medicalInfo   String?
+  isMainTraveler Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  groupExpenses GroupExpenseSplit[]
+}
+
+model GroupExpense {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  description   String
+  totalAmount   Float
+  currency      String
+  paidById      String   // Traveler ID who paid
+  category      String
+  date          DateTime
+  isSettled     Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  splits        GroupExpenseSplit[]
+}
+
+model GroupExpenseSplit {
+  id            String   @id @default(cuid())
+  groupExpenseId String
+  groupExpense  GroupExpense @relation(fields: [groupExpenseId], references: [id], onDelete: Cascade)
+  travelerId    String
+  traveler      Traveler @relation(fields: [travelerId], references: [id], onDelete: Cascade)
+  shareAmount   Float
+  isPaid        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// SAFETY - Country Safety Intelligence
+// ============================================
+model SafetyInfo {
+  id            String   @id @default(cuid())
+  tripId        String
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type          String   // scam_alert, unsafe_zone, emergency_number, embassy, hospital, general_safety
+  title         String
+  description   String
+  location      String?
+  latitude      Float?
+  longitude     Float?
+  severity      String?  // low, medium, high
+  source        String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// JET LAG - Sleep Adjustment Plans
+// ============================================
+model JetLagPlan {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  date            DateTime
+  phase           String   // pre_departure, during_flight, arrival_day, adjustment
+  sleepTime       String?  // recommended sleep time
+  wakeTime        String?  // recommended wake time
+  caffeineAdvice  String?
+  lightExposure   String?
+  mealTiming      String?
+  activityAdvice  String?
+  notes           String?
+  isCompleted     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// BAGGAGE - Airline Baggage Rules
+// ============================================
+model BaggageInfo {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  airline         String
+  flightNumber    String?
+  cabinAllowance  String?  // e.g., "7kg, 55x40x20cm"
+  checkedAllowance String? // e.g., "23kg x 2"
+  excessBaggageFee Float?
+  currency        String?
+  restrictedItems String?  // JSON array
+  specialItems    String?  // sports equipment, musical instruments, etc.
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// IMMIGRATION - Arrival Preparation
+// ============================================
+model ImmigrationPrep {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type            String   // document, question, customs_rule, restricted_item, arrival_form
+  title           String
+  description     String
+  isRequired      Boolean  @default(true)
+  isCompleted     Boolean  @default(false)
+  priority        String   @default("medium")
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// NOTIFICATIONS - Smart Alert System
+// ============================================
+model Notification {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type            String   // web_checkin, visa_deadline, boarding, gate_change, hotel_checkin, currency_alert, activity
+  title           String
+  message         String
+  scheduledFor    DateTime?
+  isSent          Boolean  @default(false)
+  isRead          Boolean  @default(false)
+  actionUrl       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// AI CHAT - In-App AI Assistant
+// ============================================
+model AIChat {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  role            String   // user, assistant
+  content         String
+  context         String?  // JSON with relevant trip context
+  responseTime    Int?     // in ms
+  createdAt       DateTime @default(now())
+}
