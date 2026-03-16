@@ -1,8 +1,66 @@
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import Groq from 'groq-sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// AI Provider Configuration for Document Parsing
+// Note: Image parsing requires OpenAI or Gemini (vision support)
+const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+const gemini = process.env.GOOGLE_AI_API_KEY ? new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY) : null;
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+// Check which providers are available
+function hasVisionProvider(): boolean {
+  return !!(openai || gemini);
+}
+
+function hasTextProvider(): boolean {
+  return !!(groq || gemini || anthropic || openai);
+}
+
+// Unified text completion for document parsing
+async function getDocumentParseCompletion(systemPrompt: string, userPrompt: string): Promise<string> {
+  if (groq) {
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 2000,
+    });
+    return response.choices[0]?.message?.content || '{}';
+  } else if (gemini) {
+    const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+      generationConfig: { maxOutputTokens: 2000 },
+    });
+    return result.response.text();
+  } else if (anthropic) {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
+    return textBlock?.text || '{}';
+  } else if (openai) {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 2000,
+      response_format: { type: 'json_object' },
+    });
+    return response.choices[0]?.message?.content || '{}';
+  }
+  throw new Error('No AI provider configured. Set GROQ_API_KEY, GOOGLE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY');
+}
 
 // ============================================
 // SMART DOCUMENT PARSING ENGINE
@@ -168,41 +226,70 @@ async function parseImageDocument(
   documentType: string
 ): Promise<ParsedDocumentResult> {
   const prompt = getExtractionPrompt(documentType);
+  const systemPrompt = `You are an expert document parser specializing in travel documents. Extract all relevant information from the image and return it as JSON. Be precise with dates, times, and reference numbers.`;
   
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: `You are an expert document parser specializing in travel documents. Extract all relevant information from the image and return it as JSON. Be precise with dates, times, and reference numbers.`,
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: prompt,
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:image/jpeg;base64,${base64Image}`,
-            },
-          },
-        ],
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
+  // Try Gemini first for vision (free tier)
+  if (gemini) {
+    try {
+      const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: `${systemPrompt}\n\n${prompt}` },
+            { inlineData: { mimeType: 'image/jpeg', data: base64Image } }
+          ]
+        }],
+        generationConfig: { maxOutputTokens: 2000 },
+      });
+      const content = result.response.text();
+      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || content.match(/(\{[\s\S]*\})/);
+      const jsonStr = jsonMatch ? jsonMatch[1] : content;
+      const parsed = JSON.parse(jsonStr.trim());
+      return {
+        type: documentType as any,
+        confidence: parsed.confidence || 0.8,
+        data: parsed.data || parsed,
+        warnings: parsed.warnings,
+      };
+    } catch (error) {
+      console.error('Gemini vision parsing error:', error);
+    }
+  }
   
-  const result = JSON.parse(response.choices[0].message.content || '{}');
+  // Fallback to OpenAI if available
+  if (openai) {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
+          ],
+        },
+      ],
+      max_tokens: 2000,
+      response_format: { type: 'json_object' },
+    });
+    
+    const result = JSON.parse(response.choices[0].message.content || '{}');
+    return {
+      type: documentType as any,
+      confidence: result.confidence || 0.8,
+      data: result.data || result,
+      warnings: result.warnings,
+    };
+  }
   
+  // No vision provider available
   return {
-    type: documentType as any,
-    confidence: result.confidence || 0.8,
-    data: result.data || result,
-    warnings: result.warnings,
+    type: 'other',
+    confidence: 0,
+    data: {},
+    warnings: ['Image parsing requires Google AI (Gemini) or OpenAI API key. Please enter details manually or upload a text/PDF document.'],
   };
 }
 
@@ -211,32 +298,34 @@ async function parseTextDocument(
   documentType: string
 ): Promise<ParsedDocumentResult> {
   const prompt = getExtractionPrompt(documentType);
+  const systemPrompt = `You are an expert document parser specializing in travel documents. Extract all relevant information from the text and return it as JSON. Be precise with dates, times, and reference numbers. IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
+  const userPrompt = `${prompt}\n\nDocument content:\n${textContent}`;
   
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: `You are an expert document parser specializing in travel documents. Extract all relevant information from the text and return it as JSON. Be precise with dates, times, and reference numbers.`,
-      },
-      {
-        role: 'user',
-        content: `${prompt}\n\nDocument content:\n${textContent}`,
-      },
-    ],
-    max_tokens: 2000,
-    response_format: { type: 'json_object' },
-  });
-  
-  const result = JSON.parse(response.choices[0].message.content || '{}');
-  
-  return {
-    type: documentType as any,
-    confidence: result.confidence || 0.8,
-    data: result.data || result,
-    rawText: textContent,
-    warnings: result.warnings,
-  };
+  try {
+    const content = await getDocumentParseCompletion(systemPrompt, userPrompt);
+    
+    // Extract JSON from response (handles markdown code blocks)
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || content.match(/(\{[\s\S]*\})/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    const result = JSON.parse(jsonStr.trim());
+    
+    return {
+      type: documentType as any,
+      confidence: result.confidence || 0.8,
+      data: result.data || result,
+      rawText: textContent,
+      warnings: result.warnings,
+    };
+  } catch (error) {
+    console.error('Text document parsing error:', error);
+    return {
+      type: documentType as any,
+      confidence: 0.3,
+      data: {},
+      rawText: textContent,
+      warnings: ['Failed to parse document automatically. Please review and enter details manually.'],
+    };
+  }
 }
 
 function getExtractionPrompt(documentType: string): string {
@@ -347,22 +436,20 @@ export async function processMultipleDocuments(
 // ============================================
 
 export async function parseEmailContent(emailContent: string): Promise<ParsedDocumentResult[]> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: `You are an expert at parsing travel booking confirmation emails. Extract all booking information (flights, hotels, activities) and return as JSON array.`,
-      },
-      {
-        role: 'user',
-        content: `Parse this email and extract all travel booking information:\n\n${emailContent}`,
-      },
-    ],
-    max_tokens: 3000,
-    response_format: { type: 'json_object' },
-  });
+  const systemPrompt = `You are an expert at parsing travel booking confirmation emails. Extract all booking information (flights, hotels, activities) and return as JSON array. IMPORTANT: Return ONLY valid JSON with a "bookings" key containing an array.`;
+  const userPrompt = `Parse this email and extract all travel booking information:\n\n${emailContent}`;
   
-  const result = JSON.parse(response.choices[0].message.content || '{"bookings": []}');
-  return result.bookings || [];
+  try {
+    const content = await getDocumentParseCompletion(systemPrompt, userPrompt);
+    
+    // Extract JSON from response
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || content.match(/(\{[\s\S]*\})/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    const result = JSON.parse(jsonStr.trim());
+    
+    return result.bookings || [];
+  } catch (error) {
+    console.error('Email parsing error:', error);
+    return [];
+  }
 }
