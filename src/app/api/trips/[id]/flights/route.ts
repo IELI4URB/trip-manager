@@ -8,6 +8,15 @@ export async function POST(
 ) {
   try {
     const body = await request.json();
+    
+    // Validate required fields - at least need departure and arrival times
+    if (!body.departureTime || !body.arrivalTime) {
+      return NextResponse.json(
+        { error: 'Departure and arrival times are required' },
+        { status: 400 }
+      );
+    }
+    
     const flight = await prisma.flight.create({
       data: {
         tripId: params.id,

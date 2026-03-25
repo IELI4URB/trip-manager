@@ -324,28 +324,43 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 async function saveExtractedData(tripId: string, parsedData: any) {
-  const { type, data } = parsedData;
+  const { type, data, confidence } = parsedData;
+
+  // Don't save if confidence is too low or data is essentially empty
+  if (confidence < 0.3) {
+    console.log('Skipping save: confidence too low', confidence);
+    return;
+  }
 
   try {
     switch (type) {
       case 'flight':
+        // Only save flight if we have meaningful data (airline/flight info AND times)
+        const hasFlightInfo = data.airline || data.flightNumber || data.departureAirportCode || data.arrivalAirportCode;
+        const hasTimes = data.departureTime && data.arrivalTime;
+        
+        if (!hasFlightInfo || !hasTimes) {
+          console.log('Skipping flight save: missing flight information or times', { hasFlightInfo, hasTimes });
+          return;
+        }
+        
         await fetch(`/api/trips/${tripId}/flights`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            airline: data.airline || 'Unknown Airline',
-            flightNumber: data.flightNumber || 'Unknown',
+            airline: data.airline || data.departureAirportCode || 'Airline TBD',
+            flightNumber: data.flightNumber || '',
             pnr: data.pnr,
-            departureCity: data.departureCity || 'Unknown',
+            departureCity: data.departureCity || data.departureAirportCode || '',
             departureAirport: data.departureAirport,
             departureAirportCode: data.departureAirportCode,
             departureTerminal: data.departureTerminal,
-            departureTime: data.departureTime || new Date().toISOString(),
-            arrivalCity: data.arrivalCity || 'Unknown',
+            departureTime: data.departureTime || null,
+            arrivalCity: data.arrivalCity || data.arrivalAirportCode || '',
             arrivalAirport: data.arrivalAirport,
             arrivalAirportCode: data.arrivalAirportCode,
             arrivalTerminal: data.arrivalTerminal,
-            arrivalTime: data.arrivalTime || new Date().toISOString(),
+            arrivalTime: data.arrivalTime || null,
             seatNumber: data.seatNumber,
             cabinClass: data.cabinClass,
             bookingRef: data.bookingRef || data.pnr,
@@ -355,15 +370,24 @@ async function saveExtractedData(tripId: string, parsedData: any) {
         break;
 
       case 'hotel':
+        // Only save hotel if we have meaningful data (name/address AND dates)
+        const hasHotelInfo = data.name || data.address || data.city;
+        const hasDates = data.checkIn && data.checkOut;
+        
+        if (!hasHotelInfo || !hasDates) {
+          console.log('Skipping hotel save: missing hotel information or dates', { hasHotelInfo, hasDates });
+          return;
+        }
+        
         await fetch(`/api/trips/${tripId}/hotels`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: data.name || 'Unknown Hotel',
-            address: data.address || 'Unknown Address',
+            name: data.name || 'Hotel TBD',
+            address: data.address || '',
             city: data.city,
-            checkIn: data.checkIn || new Date().toISOString(),
-            checkOut: data.checkOut || new Date().toISOString(),
+            checkIn: data.checkIn || null,
+            checkOut: data.checkOut || null,
             checkInTime: data.checkInTime,
             checkOutTime: data.checkOutTime,
             roomType: data.roomType,

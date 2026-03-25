@@ -8,6 +8,15 @@ export async function POST(
 ) {
   try {
     const body = await request.json();
+    
+    // Validate required fields
+    if (!body.checkIn || !body.checkOut) {
+      return NextResponse.json(
+        { error: 'Check-in and check-out dates are required' },
+        { status: 400 }
+      );
+    }
+    
     const hotel = await prisma.hotel.create({
       data: {
         tripId: params.id,

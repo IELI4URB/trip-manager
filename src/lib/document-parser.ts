@@ -137,13 +137,15 @@ export async function parseDocument(
     // Determine document type from filename or content
     const documentType = detectDocumentType(fileName, fileContent);
     
-    // Use GPT-4 Vision for images, GPT-4 for text/PDF content
+    // Use Vision API for images AND PDFs (AI vision models can read PDFs directly)
     const isImage = mimeType.startsWith('image/');
+    const isPdf = mimeType === 'application/pdf';
+    const needsVision = isImage || isPdf;
     
     let extractedData: ParsedDocumentResult;
     
-    if (isImage) {
-      extractedData = await parseImageDocument(fileContent, documentType);
+    if (needsVision) {
+      extractedData = await parseImageDocument(fileContent, mimeType, documentType);
     } else {
       extractedData = await parseTextDocument(fileContent, documentType);
     }
@@ -222,13 +224,14 @@ function detectDocumentType(fileName: string, content: string): string {
 }
 
 async function parseImageDocument(
-  base64Image: string,
+  base64Content: string,
+  mimeType: string,
   documentType: string
 ): Promise<ParsedDocumentResult> {
   const prompt = getExtractionPrompt(documentType);
-  const systemPrompt = `You are an expert document parser specializing in travel documents. Extract all relevant information from the image and return it as JSON. Be precise with dates, times, and reference numbers.`;
+  const systemPrompt = `You are an expert document parser specializing in travel documents. Extract all relevant information from the document and return it as JSON. Be precise with dates, times, and reference numbers. Parse ALL text visible in the document carefully.`;
   
-  // Try Gemini first for vision (free tier)
+  // Try Gemini first for vision (free tier) - supports both images and PDFs
   if (gemini) {
     try {
       const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
@@ -237,7 +240,7 @@ async function parseImageDocument(
           role: 'user',
           parts: [
             { text: `${systemPrompt}\n\n${prompt}` },
-            { inlineData: { mimeType: 'image/jpeg', data: base64Image } }
+            { inlineData: { mimeType: mimeType, data: base64Content } }
           ]
         }],
         generationConfig: { maxOutputTokens: 2000 },
@@ -257,8 +260,11 @@ async function parseImageDocument(
     }
   }
   
-  // Fallback to OpenAI if available
+  // Fallback to OpenAI if available - for PDFs, OpenAI needs image format
   if (openai) {
+    // OpenAI vision API works best with images; for PDFs we'd need conversion
+    // But GPT-4o can handle PDFs via URL or base64 as images in some cases
+    const dataUrl = `data:${mimeType};base64,${base64Content}`;
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
@@ -267,7 +273,7 @@ async function parseImageDocument(
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
+            { type: 'image_url', image_url: { url: dataUrl } },
           ],
         },
       ],
