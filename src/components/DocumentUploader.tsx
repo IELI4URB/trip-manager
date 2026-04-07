@@ -323,6 +323,29 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+// Helper to validate if a value is meaningful (not "Unknown", empty, or placeholder)
+function isValidValue(value: any): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value !== 'string') return true;
+  const lowerValue = value.toLowerCase().trim();
+  return lowerValue !== '' && 
+         lowerValue !== 'unknown' && 
+         lowerValue !== 'n/a' && 
+         lowerValue !== 'tbd' &&
+         lowerValue !== 'null' &&
+         !lowerValue.includes('unknown');
+}
+
+// Helper to validate ISO date format
+function isValidISODate(dateStr: string): boolean {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return false;
+  // Check if year seems reasonable (between 2020 and 2030)
+  const year = date.getFullYear();
+  return year >= 2020 && year <= 2030;
+}
+
 async function saveExtractedData(tripId: string, parsedData: any) {
   const { type, data, confidence } = parsedData;
 
@@ -335,12 +358,26 @@ async function saveExtractedData(tripId: string, parsedData: any) {
   try {
     switch (type) {
       case 'flight':
-        // Only save flight if we have meaningful data (airline/flight info AND times)
-        const hasFlightInfo = data.airline || data.flightNumber || data.departureAirportCode || data.arrivalAirportCode;
-        const hasTimes = data.departureTime && data.arrivalTime;
+        // Validate we have meaningful flight info (not just "Unknown" values)
+        const hasValidAirline = isValidValue(data.airline);
+        const hasValidFlightNumber = isValidValue(data.flightNumber);
+        const hasValidDepartureCode = isValidValue(data.departureAirportCode);
+        const hasValidArrivalCode = isValidValue(data.arrivalAirportCode);
+        const hasValidDepartureTime = isValidISODate(data.departureTime);
+        const hasValidArrivalTime = isValidISODate(data.arrivalTime);
+        
+        const hasFlightInfo = hasValidAirline || hasValidFlightNumber || hasValidDepartureCode || hasValidArrivalCode;
+        const hasTimes = hasValidDepartureTime && hasValidArrivalTime;
         
         if (!hasFlightInfo || !hasTimes) {
-          console.log('Skipping flight save: missing flight information or times', { hasFlightInfo, hasTimes });
+          console.log('Skipping flight save: missing valid flight information or times', { 
+            hasFlightInfo, 
+            hasTimes,
+            airline: data.airline,
+            flightNumber: data.flightNumber,
+            departureTime: data.departureTime,
+            arrivalTime: data.arrivalTime
+          });
           return;
         }
         
@@ -348,23 +385,23 @@ async function saveExtractedData(tripId: string, parsedData: any) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            airline: data.airline || data.departureAirportCode || 'Airline TBD',
-            flightNumber: data.flightNumber || '',
-            pnr: data.pnr,
-            departureCity: data.departureCity || data.departureAirportCode || '',
-            departureAirport: data.departureAirport,
-            departureAirportCode: data.departureAirportCode,
-            departureTerminal: data.departureTerminal,
-            departureTime: data.departureTime || null,
-            arrivalCity: data.arrivalCity || data.arrivalAirportCode || '',
-            arrivalAirport: data.arrivalAirport,
-            arrivalAirportCode: data.arrivalAirportCode,
-            arrivalTerminal: data.arrivalTerminal,
-            arrivalTime: data.arrivalTime || null,
-            seatNumber: data.seatNumber,
-            cabinClass: data.cabinClass,
-            bookingRef: data.bookingRef || data.pnr,
-            baggageAllowance: data.baggageAllowance,
+            airline: isValidValue(data.airline) ? data.airline : (isValidValue(data.departureAirportCode) ? data.departureAirportCode : 'Airline TBD'),
+            flightNumber: isValidValue(data.flightNumber) ? data.flightNumber : '',
+            pnr: isValidValue(data.pnr) ? data.pnr : null,
+            departureCity: isValidValue(data.departureCity) ? data.departureCity : (isValidValue(data.departureAirportCode) ? data.departureAirportCode : ''),
+            departureAirport: isValidValue(data.departureAirport) ? data.departureAirport : null,
+            departureAirportCode: isValidValue(data.departureAirportCode) ? data.departureAirportCode : null,
+            departureTerminal: isValidValue(data.departureTerminal) ? data.departureTerminal : null,
+            departureTime: data.departureTime,
+            arrivalCity: isValidValue(data.arrivalCity) ? data.arrivalCity : (isValidValue(data.arrivalAirportCode) ? data.arrivalAirportCode : ''),
+            arrivalAirport: isValidValue(data.arrivalAirport) ? data.arrivalAirport : null,
+            arrivalAirportCode: isValidValue(data.arrivalAirportCode) ? data.arrivalAirportCode : null,
+            arrivalTerminal: isValidValue(data.arrivalTerminal) ? data.arrivalTerminal : null,
+            arrivalTime: data.arrivalTime,
+            seatNumber: isValidValue(data.seatNumber) ? data.seatNumber : null,
+            cabinClass: isValidValue(data.cabinClass) ? data.cabinClass : null,
+            bookingRef: isValidValue(data.bookingRef) ? data.bookingRef : (isValidValue(data.pnr) ? data.pnr : null),
+            baggageAllowance: isValidValue(data.baggageAllowance) ? data.baggageAllowance : null,
           }),
         });
         break;

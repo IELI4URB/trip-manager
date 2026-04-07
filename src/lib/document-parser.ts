@@ -337,32 +337,46 @@ async function parseTextDocument(
 function getExtractionPrompt(documentType: string): string {
   switch (documentType) {
     case 'flight':
-      return `Extract flight ticket information and return as JSON with these fields:
+      return `Extract flight ticket information from this document. This is a FLIGHT TICKET or E-TICKET.
+
+IMPORTANT INSTRUCTIONS:
+1. Look carefully for the ACTUAL flight dates and times printed on the ticket
+2. Flight dates are usually in formats like "15 Apr 2024", "April 15, 2024", "15/04/2024", etc.
+3. Flight times are in formats like "14:30", "2:30 PM", "1430 hrs"
+4. Convert all dates/times to ISO 8601 format: YYYY-MM-DDTHH:MM:SS (e.g., 2024-04-15T14:30:00)
+5. If you cannot find a specific field, use null - DO NOT use "Unknown" or made-up values
+6. The airline name is usually prominently displayed (e.g., "Air India", "Emirates", "IndiGo")
+7. Flight numbers look like "AI302", "EK504", "6E2341"
+8. PNR/Booking Reference is usually a 6-character alphanumeric code
+
+Return as JSON:
 {
   "type": "flight",
   "confidence": 0.0-1.0,
   "data": {
-    "airline": "Airline name",
-    "flightNumber": "e.g., AI302",
-    "pnr": "PNR/Booking reference",
-    "departureCity": "City name",
-    "departureAirport": "Full airport name",
-    "departureAirportCode": "e.g., DEL",
-    "departureTerminal": "Terminal number",
-    "departureGate": "Gate if available",
-    "departureTime": "ISO datetime format",
-    "arrivalCity": "City name",
-    "arrivalAirport": "Full airport name",
-    "arrivalAirportCode": "e.g., SIN",
-    "arrivalTerminal": "Terminal number",
-    "arrivalTime": "ISO datetime format",
-    "seatNumber": "e.g., 23A",
-    "cabinClass": "economy/premium_economy/business/first",
-    "baggageAllowance": "e.g., 23kg checked, 7kg cabin",
-    "passengerName": "Full name"
+    "airline": "Airline name (e.g., Air India, Emirates) - null if not found",
+    "flightNumber": "e.g., AI302 - null if not found",
+    "pnr": "PNR/Booking reference (6-char code) - null if not found",
+    "departureCity": "City name - null if not found",
+    "departureAirport": "Full airport name - null if not found",
+    "departureAirportCode": "3-letter IATA code e.g., DEL - null if not found",
+    "departureTerminal": "Terminal number - null if not found",
+    "departureGate": "Gate if available - null if not found",
+    "departureTime": "MUST be in ISO format YYYY-MM-DDTHH:MM:SS - null if not found",
+    "arrivalCity": "City name - null if not found",
+    "arrivalAirport": "Full airport name - null if not found",
+    "arrivalAirportCode": "3-letter IATA code e.g., SIN - null if not found",
+    "arrivalTerminal": "Terminal number - null if not found",
+    "arrivalTime": "MUST be in ISO format YYYY-MM-DDTHH:MM:SS - null if not found",
+    "seatNumber": "e.g., 23A - null if not found",
+    "cabinClass": "economy/premium_economy/business/first - null if not found",
+    "baggageAllowance": "e.g., 23kg checked, 7kg cabin - null if not found",
+    "passengerName": "Full name - null if not found"
   },
-  "warnings": ["Any important notices"]
-}`;
+  "warnings": ["Any important notices or parsing issues"]
+}
+
+If you cannot extract meaningful flight information, set confidence to 0 and return empty/null fields.`;
 
     case 'hotel':
       return `Extract hotel booking information and return as JSON with these fields:

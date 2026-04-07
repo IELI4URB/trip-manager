@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plane, Plus, Clock, MapPin, X } from 'lucide-react';
+import { Plane, Plus, Clock, MapPin, X, Trash2 } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -13,6 +13,7 @@ interface FlightsSectionProps {
 export default function FlightsSection({ trip, onUpdate }: FlightsSectionProps) {
   const [showForm, setShowForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     airline: '',
     flightNumber: '',
@@ -25,6 +26,28 @@ export default function FlightsSection({ trip, onUpdate }: FlightsSectionProps) 
     seatNumber: '',
     bookingRef: '',
   });
+
+  const handleDelete = async (flightId: string) => {
+    if (!confirm('Are you sure you want to delete this flight?')) return;
+    
+    setDeletingId(flightId);
+    try {
+      const res = await fetch(`/api/trips/${trip.id}/flights?flightId=${flightId}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        toast.success('Flight deleted successfully!');
+        onUpdate();
+      } else {
+        toast.error('Failed to delete flight');
+      }
+    } catch (error) {
+      toast.error('Something went wrong');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +86,27 @@ export default function FlightsSection({ trip, onUpdate }: FlightsSectionProps) 
     }
   };
 
+  const handleDeleteAll = async () => {
+    if (!trip.flights?.length) return;
+    if (!confirm(`Are you sure you want to delete all ${trip.flights.length} flights? This cannot be undone.`)) return;
+    
+    setDeletingId('all');
+    try {
+      // Delete each flight
+      for (const flight of trip.flights) {
+        await fetch(`/api/trips/${trip.id}/flights?flightId=${flight.id}`, {
+          method: 'DELETE',
+        });
+      }
+      toast.success('All flights deleted successfully!');
+      onUpdate();
+    } catch (error) {
+      toast.error('Failed to delete some flights');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -70,13 +114,25 @@ export default function FlightsSection({ trip, onUpdate }: FlightsSectionProps) 
           <Plane className="w-6 h-6 text-primary-500" />
           Flights
         </h2>
-        <button
-          onClick={() => setShowForm(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add Flight
-        </button>
+        <div className="flex items-center gap-2">
+          {trip.flights?.length > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              disabled={deletingId === 'all'}
+              className="btn-secondary flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className={`w-4 h-4 ${deletingId === 'all' ? 'animate-pulse' : ''}`} />
+              Delete All
+            </button>
+          )}
+          <button
+            onClick={() => setShowForm(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Flight
+          </button>
+        </div>
       </div>
 
       {/* Flight List */}
@@ -93,13 +149,23 @@ export default function FlightsSection({ trip, onUpdate }: FlightsSectionProps) 
                     Flight {flight.flightNumber}
                   </p>
                 </div>
-                <span className={`badge ${
-                  flight.status === 'confirmed' ? 'badge-success' :
-                  flight.status === 'delayed' ? 'badge-warning' :
-                  'badge-danger'
-                }`}>
-                  {flight.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`badge ${
+                    flight.status === 'confirmed' ? 'badge-success' :
+                    flight.status === 'delayed' ? 'badge-warning' :
+                    'badge-danger'
+                  }`}>
+                    {flight.status}
+                  </span>
+                  <button
+                    onClick={() => handleDelete(flight.id)}
+                    disabled={deletingId === flight.id}
+                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                    title="Delete flight"
+                  >
+                    <Trash2 className={`w-4 h-4 ${deletingId === flight.id ? 'animate-pulse' : ''}`} />
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-8">
